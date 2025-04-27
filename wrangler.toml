@@ -8,6 +8,7 @@ workers_dev = false
 binding = "DB"
 database_name = "blog-likes"
 database_id = "210d1bd9-ede1-4cf0-9697-028f48de81dd"
+
 [observability.logs]
 enabled = true
 

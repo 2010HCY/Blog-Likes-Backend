@@ -34,7 +34,7 @@ export default {
         }
       } else {
         if (!hasRow) {
-          likes = 1;
+          likes = 0;
           await DB.prepare("INSERT INTO likes (url, likes) VALUES (?, ?)")
             .bind(url, likes)
             .run();
