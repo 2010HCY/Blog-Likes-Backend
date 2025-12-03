@@ -1,16 +1,15 @@
 export default {
   async fetch(request, env, ctx) {
     const { DB } = env;
-    const urlObj = new URL(request.url);
-    const searchParams = urlObj.searchParams;
-    const url = searchParams.get("url");
-    const addLikes = parseInt(searchParams.get("likes") || "0", 10);
 
     const corsHeaders = {
       "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET,OPTIONS",
+      "Access-Control-Allow-Methods": "POST,OPTIONS",
       "Access-Control-Allow-Headers": "*"
     };
+
+    const urlObj = new URL(request.url);
+    const pathname = urlObj.pathname;
 
     // 日志
     const nowStr = new Date().toISOString();
@@ -32,29 +31,102 @@ export default {
       return new Response(null, { headers: corsHeaders });
     }
 
-    if (!url) {
-      return new Response(JSON.stringify({ error: "Missing url param" }), { status: 400, headers: corsHeaders });
+    // 只处理 /like 路由
+    if (pathname !== "/like") {
+      return new Response(JSON.stringify({ error: "Not Found" }), {
+        status: 404,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
     }
 
-    let result = await DB.prepare("SELECT likes FROM likes WHERE url = ?").bind(url).first();
-    let likes = result?.likes ? parseInt(result.likes) : 0;
+    if (request.method !== "POST") {
+      return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+        status: 405,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+
+    let body;
+    try {
+      body = await request.json();
+    } catch (e) {
+      return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+
+    const urlKey = body && body.Url;
+    const addLikes = parseInt(body && body.Add ? body.Add : 0, 10);
+
+    if (!urlKey) {
+      return new Response(JSON.stringify({ error: "Missing Url in body" }), {
+        status: 400,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+
+    let result;
+    try {
+      result = await DB.prepare("SELECT likes FROM likes WHERE url = ?")
+        .bind(urlKey)
+        .first();
+    } catch (e) {
+      console.error("DB SELECT error:", e);
+      return new Response(JSON.stringify({ error: "DB SELECT error" }), {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
+    }
+
+    let likes = result && result.likes ? parseInt(result.likes, 10) : 0;
     let hasRow = !!result;
 
-    if (addLikes > 0) {
-      if (hasRow) {
-        likes += addLikes;
-        await DB.prepare("UPDATE likes SET likes = ? WHERE url = ?").bind(likes, url).run();
+    try {
+      if (addLikes > 0) {
+        if (hasRow) {
+          likes += addLikes;
+          await DB.prepare("UPDATE likes SET likes = ? WHERE url = ?")
+            .bind(likes, urlKey)
+            .run();
+        } else {
+          likes = addLikes;
+          await DB.prepare("INSERT INTO likes (url, likes) VALUES (?, ?)")
+            .bind(urlKey, likes)
+            .run();
+        }
       } else {
-        likes = addLikes;
-        await DB.prepare("INSERT INTO likes (url, likes) VALUES (?, ?)").bind(url, likes).run();
+        if (!hasRow) {
+          likes = 0;
+          await DB.prepare("INSERT INTO likes (url, likes) VALUES (?, ?)")
+            .bind(urlKey, likes)
+            .run();
+        }
       }
-    } else {
-      if (!hasRow) {
-        likes = 0;
-        await DB.prepare("INSERT INTO likes (url, likes) VALUES (?, ?)")
-          .bind(url, likes)
-          .run();
-      }
+    } catch (e) {
+      console.error("DB INSERT/UPDATE error:", e);
+      return new Response(JSON.stringify({ error: "DB write error" }), {
+        status: 500,
+        headers: {
+          "Content-Type": "application/json",
+          ...corsHeaders
+        }
+      });
     }
 
     return new Response(JSON.stringify({ likes }), {
